@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>User Dashboard (Live)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 min-h-screen flex items-center justify-center">
+<div class="bg-gray-800 p-8 rounded-2xl shadow-2xl max-w-lg w-full text-white">
+    <h2 class="text-2xl font-bold text-center mb-6 text-yellow-300">User Dashboard (Live)</h2>
+    <form id="authForm" class="space-y-4 mb-6">
+        <div>
+            <label class="block font-semibold text-gray-300 mb-1">API Key</label>
+            <input type="text" id="apikey" name="apikey" class="w-full border border-gray-700 bg-gray-900 text-white rounded px-3 py-2" autocomplete="off">
+        </div>
+        <div class="flex items-center justify-center text-gray-400 font-semibold">OR</div>
+        <div>
+            <label class="block font-semibold text-gray-300 mb-1">Username</label>
+            <input type="text" id="username" name="username" class="w-full border border-gray-700 bg-gray-900 text-white rounded px-3 py-2" autocomplete="username">
+        </div>
+        <div>
+            <label class="block font-semibold text-gray-300 mb-1">Password</label>
+            <input type="password" id="password" name="password" class="w-full border border-gray-700 bg-gray-900 text-white rounded px-3 py-2" autocomplete="current-password">
+        </div>
+        <button type="submit" class="w-full bg-yellow-400 text-gray-900 font-bold py-2 rounded hover:bg-yellow-500 transition">Login / Use API Key</button>
+    </form>
+    <div id="error" class="text-red-400 text-center mb-4 hidden"></div>
+    <div id="dashboard" class="hidden">
+        <div class="mb-4">
+            <div class="text-lg font-semibold text-gray-200">Welcome, <span id="userName"></span></div>
+            <div class="text-2xl font-bold text-yellow-300">Balance: ₹<span id="balance"></span></div>
+        </div>
+        <div>
+            <h3 class="text-lg font-bold text-gray-100 mb-2">Recent Transactions</h3>
+            <div id="transactions"></div>
+        </div>
+        <button id="logoutBtn" class="mt-6 w-full bg-gray-700 text-gray-200 font-semibold py-2 rounded hover:bg-gray-600 transition">Logout</button>
+    </div>
+</div>
+<script>
+let authData = null;
+let pollInterval = null;
+
+function showError(msg) {
+    document.getElementById('error').textContent = msg;
+    document.getElementById('error').classList.remove('hidden');
+}
+function hideError() {
+    document.getElementById('error').classList.add('hidden');
+}
+
+function showDashboard() {
+    document.getElementById('authForm').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+}
+function hideDashboard() {
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('authForm').classList.remove('hidden');
+}
+
+function fetchUserData() {
+    let params = new URLSearchParams();
+    if (authData.apikey) {
+        params.append('apikey', authData.apikey);
+    } else {
+        params.append('username', authData.username);
+        params.append('password', authData.password);
+    }
+    fetch('api/user_data.php?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                showError(data.error || 'Failed to fetch data');
+                hideDashboard();
+                clearInterval(pollInterval);
+                return;
+            }
+            hideError();
+            showDashboard();
+            document.getElementById('userName').textContent = data.username;
+            document.getElementById('balance').textContent = parseFloat(data.balance).toFixed(2);
+            let txHtml = '';
+            if (data.transactions.length === 0) {
+                txHtml = '<div class="text-gray-500">No transactions found.</div>';
+            } else {
+                txHtml = '<ul class="space-y-2">' + data.transactions.map(tx => `
+                    <li class="border rounded p-2 flex flex-col">
+                        <div class="flex justify-between items-center">
+                            <span class="font-semibold ${tx.type === 'sent' ? 'text-red-600' : 'text-green-600'}">${tx.type === 'sent' ? 'Sent' : 'Received'}</span>
+                            <span class="text-xs px-2 py-1 rounded ${tx.status === 'completed' ? 'bg-green-100 text-green-700' : (tx.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}">${tx.status}</span>
+                        </div>
+                        <div class="flex justify-between mt-1 text-sm">
+                            <span>${tx.type === 'sent' ? 'To' : 'From'}: <b>${tx.type === 'sent' ? tx.recipient : tx.sender}</b></span>
+                            <span>${tx.type === 'sent' ? '-' : '+'}₹${parseFloat(tx.amount).toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-xs text-gray-500 mt-1">
+                            <span>Code: ${tx.code}</span>
+                            <span>${tx.created_at}</span>
+                        </div>
+                    </li>
+                `).join('') + '</ul>';
+            }
+            document.getElementById('transactions').innerHTML = txHtml;
+        })
+        .catch(() => {
+            showError('Network error');
+            hideDashboard();
+            clearInterval(pollInterval);
+        });
+}
+
+document.getElementById('authForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const apikey = document.getElementById('apikey').value.trim();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    if (!apikey && (!username || !password)) {
+        showError('Enter API key or username and password.');
+        return;
+    }
+    authData = apikey ? { apikey } : { username, password };
+    fetchUserData();
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(fetchUserData, 2000);
+});
+
+document.getElementById('logoutBtn').addEventListener('click', function() {
+    authData = null;
+    hideDashboard();
+    if (pollInterval) clearInterval(pollInterval);
+    document.getElementById('authForm').reset();
+});
+</script>
+</body>
+</html> 
